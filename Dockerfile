@@ -17,6 +17,7 @@ RUN pnpm build
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production
 ENV PORT=4111
+ENV MASTRA_STUDIO_PATH=.mastra/output/studio
 WORKDIR /app
 COPY --from=build --chown=node:node /app/.mastra/output ./.mastra/output
 USER node

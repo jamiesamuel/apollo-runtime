@@ -16,9 +16,7 @@ export const mastra = new Mastra({
   server: {
     host: '0.0.0.0',
     port: config.PORT,
-    cors: {
-      origin: false,
-    },
+    cors: false,
     apiRoutes: [
       registerApiRoute('/health', {
         method: 'GET',
