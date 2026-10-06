@@ -1,4 +1,4 @@
-import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import type { PostgresStore } from '@mastra/pg';
@@ -7,7 +7,8 @@ import { helloTool } from '../tools/hello.js';
 import { knowledgeTool } from '../tools/knowledge.js';
 
 export function createAssistant(config: AppConfig, storage: PostgresStore): Agent {
-  const litellm = createOpenAI({
+  const litellm = createOpenAICompatible({
+    name: 'litellm',
     baseURL: process.env.LITELLM_BASE_URL!,
     apiKey: process.env.LITELLM_API_KEY!,
   });
@@ -17,7 +18,7 @@ export function createAssistant(config: AppConfig, storage: PostgresStore): Agen
     name: 'Assistant',
     description: 'A helpful starter assistant with persistent conversation history.',
     instructions: config.SYSTEM_PROMPT,
-    model: litellm.chat(config.MODEL_NAME),
+    model: litellm.chatModel(config.MODEL_NAME),
     tools: {
       helloTool,
       knowledgeTool,

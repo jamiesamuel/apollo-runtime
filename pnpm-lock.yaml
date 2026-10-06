@@ -11,6 +11,9 @@ importers:
       '@ai-sdk/openai':
         specifier: ^4.0.84
         version: 4.0.84(zod@4.5.4)
+      '@ai-sdk/openai-compatible':
+        specifier: ^3.0.63
+        version: 3.0.63(zod@4.5.4)
       '@mastra/core':
         specifier: 1.64.0
         version: 1.64.0(zod@4.5.4)
@@ -74,6 +77,12 @@ packages:
         optional: true
       express:
         optional: true
+
+  '@ai-sdk/openai-compatible@3.0.63':
+    resolution: {integrity: sha512-Uv/peV+aamk/xKK4jM2hpoleEN+T6vbu/mxkz04ZRTpjyMkxflO3GdcjMpuM28TDPctYEkibTSmqpwYs4/Lq+g==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/openai@4.0.84':
     resolution: {integrity: sha512-RsHz+jqstQ+wnMex1BLzIlwseDRzJAruT7ZW1X1azCEI9cVkSQVn17JS6qVntdi+DKkAMPg4rP1APixDEZFKiw==}
@@ -2516,6 +2525,12 @@ snapshots:
     dependencies:
       jose: 6.2.11
       uuid: 11.1.1
+
+  '@ai-sdk/openai-compatible@3.0.63(zod@4.5.4)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.22
+      '@ai-sdk/provider-utils': 5.0.54(zod@4.5.4)
+      zod: 4.5.4
 
   '@ai-sdk/openai@4.0.84(zod@4.5.4)':
     dependencies:
