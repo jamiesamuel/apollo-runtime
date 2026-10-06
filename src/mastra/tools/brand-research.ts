@@ -29,45 +29,37 @@ export const brandResearchTool = createTool({
   }),
 
   execute: async ({ brand }) => {
-    const response = await fetch(
-      `${process.env.LITELLM_BASE_URL}/responses`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.LITELLM_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
+    const runResearch = async () => {
+      const response = await fetch(
+        `${process.env.LITELLM_BASE_URL}/responses`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.LITELLM_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
 
-        body: JSON.stringify({
-          model: 'gpt-5.6-luna',
+          body: JSON.stringify({
+            model: 'gpt-5.6-luna',
 
-          input: `
+            input: `
 Research ${brand} as a potential advertising client using current web sources.
 
-Return TWO kinds of information.
+Return:
 
-BRAND CONTEXT
+1. BRAND CONTEXT
+- purpose or positioning
+- up to 3 customer personas
+- target audience
 
-Establish:
-- brand purpose or positioning
-- up to 3 important customer personas
-- concise description of the target audience
-
-This does not need to be limited to the last 90 days.
-Prefer primary brand/company sources where possible.
-
-RECENT SIGNALS
-
-Search the LAST 90 DAYS for up to 3 commercially relevant developments involving:
+2. RECENT SIGNALS
+Find up to 3 meaningful developments from the LAST 90 DAYS covering:
 - corporate priorities
-- marketing or advertising priorities
-- product/category growth
-- launches
-- major business challenges
+- marketing or advertising
+- launches or product growth
+- material business challenges
 
-Only include meaningful developments.
-
-If there are no credible recent developments, return an empty recentSignals array.
+If there are no credible recent developments, use an empty recentSignals array.
 
 Return ONLY valid JSON:
 
@@ -83,69 +75,88 @@ Return ONLY valid JSON:
   },
   "recentSignals": [
     {
-      "signal": "max 25 words",
-      "relevance": "why this could matter commercially, max 25 words",
+      "signal": "concise signal",
+      "relevance": "commercial relevance",
       "source": "source and date"
     }
   ]
 }
 
-Do not invent information.
 Do not use markdown.
-          `.trim(),
+Do not invent information.
+            `.trim(),
 
-          tools: [
-            {
-              type: 'web_search',
-              search_context_size: 'low',
-            },
-          ],
+            tools: [
+              {
+                type: 'web_search',
+                search_context_size: 'low',
+              },
+            ],
 
-          max_output_tokens: 800,
-        }),
-      },
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Brand research failed: ${response.status} ${await response.text()}`,
-      );
-    }
-
-    const data: any = await response.json();
-
-    const text = (data.output ?? [])
-      .flatMap((item: any) => item.content ?? [])
-      .filter((content: any) => content.type === 'output_text')
-      .map((content: any) => content.text)
-      .filter(Boolean)
-      .join('\n')
-      .trim();
-
-    if (!text) {
-      return {
-        brandContext: {
-          purpose: '',
-          customerPersonas: [],
-          targetAudience: '',
+            max_output_tokens: 1200,
+          }),
         },
-        recentSignals: [],
-      };
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Brand research failed: ${response.status} ${await response.text()}`,
+        );
+      }
+
+      const data: any = await response.json();
+
+      return (data.output ?? [])
+        .flatMap((item: any) => item.content ?? [])
+        .filter((content: any) => content.type === 'output_text')
+        .map((content: any) => content.text)
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+    };
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const text = await runResearch();
+
+        if (!text) {
+          continue;
+        }
+
+        const cleaned = text
+          .replace(/^```json\s*/i, '')
+          .replace(/^```\s*/i, '')
+          .replace(/\s*```$/i, '')
+          .trim();
+
+        const parsed = JSON.parse(cleaned);
+
+        return {
+          brandContext: brandContextSchema.parse(
+            parsed.brandContext,
+          ),
+
+          recentSignals: z
+            .array(recentSignalSchema)
+            .parse(parsed.recentSignals ?? []),
+        };
+      } catch (error) {
+        if (attempt === 2) {
+          console.error(
+            `Brand research failed for ${brand}:`,
+            error,
+          );
+        }
+      }
     }
-
-    const cleaned = text
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-
-    const parsed = JSON.parse(cleaned);
 
     return {
-      brandContext: brandContextSchema.parse(parsed.brandContext),
-      recentSignals: z
-        .array(recentSignalSchema)
-        .parse(parsed.recentSignals ?? []),
+      brandContext: {
+        purpose: '',
+        customerPersonas: [],
+        targetAudience: '',
+      },
+      recentSignals: [],
     };
   },
 });
