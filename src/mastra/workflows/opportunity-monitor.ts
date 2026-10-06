@@ -119,73 +119,85 @@ async function callJsonModel<T>(
   prompt: string,
   schema: z.ZodType<T>,
 ): Promise<T> {
-  const response = await fetch(
-    `${process.env.LITELLM_BASE_URL}/responses`,
-    {
-      method: 'POST',
+  let lastError: Error | null = null;
 
-      headers: {
-        Authorization:
-          `Bearer ${process.env.LITELLM_API_KEY}`,
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await fetch(
+        `${process.env.LITELLM_BASE_URL}/responses`,
+        {
+          method: 'POST',
 
-        'Content-Type':
-          'application/json',
-      },
+          headers: {
+            Authorization:
+              `Bearer ${process.env.LITELLM_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
 
-      body: JSON.stringify({
-        model:
-          process.env.MODEL_NAME ||
-          'gpt-5.6-luna',
+          body: JSON.stringify({
+            model:
+              process.env.MODEL_NAME ||
+              'gpt-5.6-luna',
 
-        input: `
+            input: `
 ${prompt}
 
 Return ONLY valid JSON.
 Do not use markdown fences.
 Do not include text before or after the JSON.
-        `.trim(),
+            `.trim(),
 
-        max_output_tokens: 1000,
-      }),
-    },
-  );
+            max_output_tokens: 1000,
+          }),
+        },
+      );
 
-  if (!response.ok) {
-    throw new Error(
-      `Model call failed: ${response.status} ${await response.text()}`,
-    );
+      if (!response.ok) {
+        throw new Error(
+          `Model call failed: ${response.status} ${await response.text()}`,
+        );
+      }
+
+      const data: any = await response.json();
+
+      const text = extractOutputText(data);
+
+      if (!text) {
+        throw new Error(
+          'Model returned no output text.',
+        );
+      }
+
+      const cleaned = text
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+      const parsed = JSON.parse(cleaned);
+
+      return schema.parse(parsed);
+    } catch (error) {
+      lastError =
+        error instanceof Error
+          ? error
+          : new Error(String(error));
+
+      console.error(
+        `Model call attempt ${attempt} failed:`,
+        lastError.message,
+      );
+
+      if (attempt < 2) {
+        await new Promise(resolve =>
+          setTimeout(resolve, 1000),
+        );
+      }
+    }
   }
 
-  const data: any =
-    await response.json();
-
-  const text =
-    extractOutputText(data);
-
-  if (!text) {
-    throw new Error(
-      'Model returned no output text.',
-    );
-  }
-
-  const cleaned = text
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-
-  let parsed: unknown;
-
-  try {
-    parsed =
-      JSON.parse(cleaned);
-  } catch {
-    throw new Error(
-      `Model returned invalid JSON: ${text}`,
-    );
-  }
-
-  return schema.parse(parsed);
+  throw lastError ??
+    new Error('Model call failed.');
 }
 
 async function runTool<T>(
