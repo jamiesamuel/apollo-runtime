@@ -5,9 +5,9 @@ import { searchKnowledge } from './knowledge.js';
 export const productKnowledgeTool = createTool({
   id: 'product-knowledge',
 
-  description:
-    'Search Future product knowledge including capabilities, pricing, positioning, ICPs, use cases and sales guidance. Use this when evaluating which Future product fits a client need or when factual product information is required.',
-
+ description:
+  'Search and compare Future products, capabilities, positioning, pricing and ICPs. ALWAYS use this before making a commercial opportunity recommendation to determine which Future product or capability best enables the idea.',
+  
   inputSchema: z.object({
     question: z
       .string()
