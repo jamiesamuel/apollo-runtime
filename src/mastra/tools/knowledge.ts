@@ -27,7 +27,7 @@ export const knowledgeTool = createTool({
         ? {
             filters: {
               type: 'eq',
-              key: 'knowledge_source',
+              key: 'knowledge_scope',
               value: knowledgeSource,
             },
           }
