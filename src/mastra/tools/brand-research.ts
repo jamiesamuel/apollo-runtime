@@ -5,7 +5,7 @@ export const brandResearchTool = createTool({
   id: 'brand-research',
 
   description:
-    'Research a brand using current web information. Use this to understand corporate priorities, marketing priorities, advertising activity, product launches, growth initiatives and other commercially relevant developments.',
+    'Research a brand using recent web information to identify commercially relevant corporate, marketing, advertising, product and growth priorities.',
 
   inputSchema: z.object({
     brand: z.string().describe('Brand or advertiser to research'),
@@ -30,29 +30,34 @@ export const brandResearchTool = createTool({
           input: `
 Research ${brand} as a potential advertising client.
 
-Identify the five most commercially relevant current findings across:
+Focus on developments from the LAST 90 DAYS.
 
+Find the 3 most commercially relevant developments across:
 - corporate priorities
 - marketing and advertising priorities
-- major product launches
-- growth categories
-- target audiences
-- geographic priorities
-- partnerships or agency activity
+- product or category growth
 - major challenges
 
-Focus on recent, credible information.
+For each return:
+1. Finding
+2. Why it matters to a media partner
+3. Source and date
 
-Explain why each finding could matter to an advertising or media partner.
+Prioritize primary and credible sources.
+Do not include developments older than 90 days unless essential context.
 
-Cite the sources.
+Be concise.
+Maximum 300 words total.
           `.trim(),
 
           tools: [
             {
               type: 'web_search',
+              search_context_size: 'low',
             },
           ],
+
+          max_output_tokens: 600,
         }),
       },
     );
