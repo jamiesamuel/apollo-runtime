@@ -17,7 +17,7 @@ export const brandResearchTool = createTool({
   id: 'brand-research',
 
   description:
-    'Research an advertiser using current web information. Returns stable brand context, customer personas and target audience, plus commercially relevant signals from the last 90 days.',
+    'Research an advertiser using current web information. Returns brand purpose, customer personas, target audience and commercially relevant signals from the last 90 days.',
 
   inputSchema: z.object({
     brand: z.string().describe('Brand or advertiser to research'),
@@ -29,11 +29,12 @@ export const brandResearchTool = createTool({
   }),
 
   execute: async ({ brand }) => {
-    const runResearch = async () => {
+    try {
       const response = await fetch(
         `${process.env.LITELLM_BASE_URL}/responses`,
         {
           method: 'POST',
+
           headers: {
             Authorization: `Bearer ${process.env.LITELLM_API_KEY}`,
             'Content-Type': 'application/json',
@@ -45,21 +46,29 @@ export const brandResearchTool = createTool({
             input: `
 Research ${brand} as a potential advertising client using current web sources.
 
-Return:
+Return TWO things.
 
-1. BRAND CONTEXT
-- purpose or positioning
-- up to 3 customer personas
-- target audience
+BRAND CONTEXT
 
-2. RECENT SIGNALS
-Find up to 3 meaningful developments from the LAST 90 DAYS covering:
+Identify:
+- brand purpose or positioning
+- up to 3 important customer personas
+- concise target audience
+
+Use reliable sources.
+This information does not need to be limited to the last 90 days.
+
+RECENT SIGNALS
+
+Find up to 3 meaningful developments from the LAST 90 DAYS involving:
 - corporate priorities
-- marketing or advertising
-- launches or product growth
+- marketing or advertising priorities
+- launches or product/category growth
 - material business challenges
 
-If there are no credible recent developments, use an empty recentSignals array.
+Only include developments that could create a meaningful media, advertising or partnership opportunity.
+
+If there are no credible recent developments, return an empty recentSignals array.
 
 Return ONLY valid JSON:
 
@@ -75,8 +84,8 @@ Return ONLY valid JSON:
   },
   "recentSignals": [
     {
-      "signal": "concise signal",
-      "relevance": "commercial relevance",
+      "signal": "concise development",
+      "relevance": "why this could matter commercially",
       "source": "source and date"
     }
   ]
@@ -93,7 +102,7 @@ Do not invent information.
               },
             ],
 
-            max_output_tokens: 1200,
+            max_output_tokens: 900,
           }),
         },
       );
@@ -106,57 +115,62 @@ Do not invent information.
 
       const data: any = await response.json();
 
-      return (data.output ?? [])
+      const text = (data.output ?? [])
         .flatMap((item: any) => item.content ?? [])
-        .filter((content: any) => content.type === 'output_text')
-        .map((content: any) => content.text)
+        .filter(
+          (content: any) =>
+            content.type === 'output_text',
+        )
+        .map(
+          (content: any) =>
+            content.text,
+        )
         .filter(Boolean)
         .join('\n')
         .trim();
-    };
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const text = await runResearch();
+      if (!text) {
+        throw new Error(
+          'Brand research returned no output text.',
+        );
+      }
 
-        if (!text) {
-          continue;
-        }
+      const cleaned = text
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
 
-        const cleaned = text
-          .replace(/^```json\s*/i, '')
-          .replace(/^```\s*/i, '')
-          .replace(/\s*```$/i, '')
-          .trim();
+      const parsed = JSON.parse(cleaned);
 
-        const parsed = JSON.parse(cleaned);
-
-        return {
-          brandContext: brandContextSchema.parse(
+      return {
+        brandContext:
+          brandContextSchema.parse(
             parsed.brandContext,
           ),
 
-          recentSignals: z
-            .array(recentSignalSchema)
-            .parse(parsed.recentSignals ?? []),
-        };
-      } catch (error) {
-        if (attempt === 2) {
-          console.error(
-            `Brand research failed for ${brand}:`,
-            error,
-          );
-        }
-      }
-    }
+        recentSignals:
+          z.array(recentSignalSchema).parse(
+            parsed.recentSignals ?? [],
+          ),
+      };
+    } catch (error) {
+      console.error(
+        `Brand research failed for ${brand}:`,
+        error,
+      );
 
-    return {
-      brandContext: {
-        purpose: '',
-        customerPersonas: [],
-        targetAudience: '',
-      },
-      recentSignals: [],
-    };
+      // A single failed research call should not
+      // terminate the proactive monitoring workflow.
+      return {
+        brandContext: {
+          purpose: '',
+          customerPersonas: [],
+          targetAudience: '',
+        },
+
+        recentSignals: [],
+      };
+    }
   },
 });
