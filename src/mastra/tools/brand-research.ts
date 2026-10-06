@@ -5,7 +5,7 @@ export const brandResearchTool = createTool({
   id: 'brand-research',
 
   description:
-    'Research a brand using recent web information to identify commercially relevant corporate, marketing, advertising, product and growth priorities.',
+    'Research current advertiser priorities using recent web sources. Use for external corporate, marketing, advertising, product and growth signals.',
 
   inputSchema: z.object({
     brand: z.string().describe('Brand or advertiser to research'),
@@ -28,26 +28,27 @@ export const brandResearchTool = createTool({
           model: 'gpt-5.6-luna',
 
           input: `
-Research ${brand} as a potential advertising client.
+Research ${brand} using current web sources.
 
-Focus on developments from the LAST 90 DAYS.
+Focus on the LAST 90 DAYS.
 
-Find the 3 most commercially relevant developments across:
-- corporate priorities
-- marketing and advertising priorities
-- product or category growth
-- major challenges
+Return exactly 3 commercially relevant signals.
 
-For each return:
-1. Finding
-2. Why it matters to a media partner
-3. Source and date
+For each:
+- SIGNAL: max 20 words
+- RELEVANCE: max 20 words
+- SOURCE: publisher/source and date
 
-Prioritize primary and credible sources.
-Do not include developments older than 90 days unless essential context.
+Prioritize:
+- corporate strategy
+- marketing or advertising priorities
+- growth categories or products
+- material business challenges
 
-Be concise.
-Maximum 300 words total.
+Prefer primary sources and recent reporting.
+Do not provide background unless required to understand a signal.
+Do not invent information.
+Maximum 150 words total.
           `.trim(),
 
           tools: [
@@ -57,7 +58,8 @@ Maximum 300 words total.
             },
           ],
 
-          max_output_tokens: 600,
+          tool_choice: 'auto',
+          max_output_tokens: 500,
         }),
       },
     );
@@ -70,13 +72,16 @@ Maximum 300 words total.
 
     const data: any = await response.json();
 
-    const research = data.output
-      ?.flatMap((item: any) => item.content ?? [])
-      ?.find((content: any) => content.type === 'output_text')
-      ?.text;
+    const research = (data.output ?? [])
+      .flatMap((item: any) => item.content ?? [])
+      .filter((content: any) => content.type === 'output_text')
+      .map((content: any) => content.text)
+      .filter(Boolean)
+      .join('\n')
+      .trim();
 
     return {
-      research: research ?? 'No brand research was returned.',
+      research: research || 'No recent brand research was found.',
     };
   },
 });
