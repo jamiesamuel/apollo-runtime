@@ -5,6 +5,9 @@ import type { PostgresStore } from '@mastra/pg';
 import type { AppConfig } from '../config.js';
 import { helloTool } from '../tools/hello.js';
 import { knowledgeTool } from '../tools/knowledge.js';
+import { brandResearchTool } from '../tools/brand-research.js';
+import { productKnowledgeTool } from '../tools/product-knowledge.js';
+import { commercialOpportunitiesTool } from '../tools/commercial-opportunities.js';
 
 export function createAssistant(config: AppConfig, storage: PostgresStore): Agent {
   const litellm = createOpenAICompatible({
@@ -22,6 +25,9 @@ export function createAssistant(config: AppConfig, storage: PostgresStore): Agen
     tools: {
       helloTool,
       knowledgeTool,
+      productKnowledgeTool,
+      brandResearchTool,
+      commercialOpportunitiesTool,
     },
     memory: new Memory({
       storage,
