@@ -1,3 +1,4 @@
+import { helloTool } from '../tools/hello.js';
 import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import type { PostgresStore } from '@mastra/pg';
@@ -11,6 +12,9 @@ export function createAssistant(config: AppConfig, storage: PostgresStore): Agen
     description: 'A helpful starter assistant with persistent conversation history.',
     instructions: config.SYSTEM_PROMPT,
     model: getModelIdentifier(config),
+    tools: {
+      helloTool,
+    },
     memory: new Memory({
       storage,
       options: {
