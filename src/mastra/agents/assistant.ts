@@ -8,8 +8,8 @@ import { knowledgeTool } from '../tools/knowledge.js';
 
 export function createAssistant(config: AppConfig, storage: PostgresStore): Agent {
   const litellm = createOpenAI({
-    baseURL: process.env.LITELLM_BASE_URL,
-    apiKey: process.env.LITELLM_API_KEY,
+    baseURL: process.env.LITELLM_BASE_URL!,
+    apiKey: process.env.LITELLM_API_KEY!,
   });
 
   return new Agent({
@@ -17,7 +17,7 @@ export function createAssistant(config: AppConfig, storage: PostgresStore): Agen
     name: 'Assistant',
     description: 'A helpful starter assistant with persistent conversation history.',
     instructions: config.SYSTEM_PROMPT,
-    model: litellm(config.MODEL_NAME),
+    model: litellm.chat(config.MODEL_NAME),
     tools: {
       helloTool,
       knowledgeTool,
