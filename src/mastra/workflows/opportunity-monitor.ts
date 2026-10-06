@@ -12,6 +12,11 @@ SCHEMAS
 ========================================================
 */
 
+const researchItemSchema = z.object({
+  brand: z.string(),
+  research: z.string(),
+});
+
 const brandContextSchema = z.object({
   purpose: z.string(),
   customerPersonas: z.array(z.string()),
@@ -24,16 +29,15 @@ const recentSignalSchema = z.object({
   source: z.string(),
 });
 
-const researchItemSchema = z.object({
+const evaluatedBrandSchema = z.object({
   brand: z.string(),
-  brandContext: brandContextSchema,
-  recentSignals: z.array(recentSignalSchema),
-});
+  research: z.string(),
 
-const signalSchema = z.object({
-  brand: z.string(),
   brandContext: brandContextSchema,
-  recentSignals: z.array(recentSignalSchema),
+
+  recentSignals: z.array(
+    recentSignalSchema,
+  ),
 
   opportunityStrength: z.enum([
     'HIGH',
@@ -55,12 +59,18 @@ const signalSchema = z.object({
 
 const opportunitySchema = z.object({
   brand: z.string(),
-  opportunityStrength: z.enum(['HIGH', 'MEDIUM']),
+
+  opportunityStrength: z.enum([
+    'HIGH',
+    'MEDIUM',
+  ]),
+
   opportunityBasis: z.enum([
     'SIGNAL_LED',
     'FIT_LED',
     'SIGNAL_AND_FIT',
   ]),
+
   opportunity: z.string(),
   whyNow: z.string(),
   idea: z.string(),
@@ -71,7 +81,12 @@ const opportunitySchema = z.object({
 
 const ignoredSchema = z.object({
   brand: z.string(),
-  opportunityStrength: z.enum(['LOW', 'UNKNOWN']),
+
+  opportunityStrength: z.enum([
+    'LOW',
+    'UNKNOWN',
+  ]),
+
   reason: z.string(),
 });
 
@@ -81,48 +96,8 @@ HELPERS
 ========================================================
 */
 
-async function callModel<T>(
-  prompt: string,
-  schema: z.ZodType<T>,
-): Promise<T> {
-  const response = await fetch(
-    `${process.env.LITELLM_BASE_URL}/responses`,
-    {
-      method: 'POST',
-
-      headers: {
-        Authorization: `Bearer ${process.env.LITELLM_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-
-      body: JSON.stringify({
-        model:
-          process.env.MODEL_NAME ||
-          'gpt-5.6-luna',
-
-        input: `
-${prompt}
-
-IMPORTANT:
-Return ONLY valid JSON.
-Do not use markdown fences.
-Do not include commentary before or after the JSON.
-        `.trim(),
-
-        max_output_tokens: 700,
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Model call failed: ${response.status} ${await response.text()}`,
-    );
-  }
-
-  const data: any = await response.json();
-
-  const text = (data.output ?? [])
+function extractOutputText(data: any): string {
+  return (data.output ?? [])
     .flatMap(
       (item: any) =>
         item.content ?? [],
@@ -138,6 +113,54 @@ Do not include commentary before or after the JSON.
     .filter(Boolean)
     .join('\n')
     .trim();
+}
+
+async function callJsonModel<T>(
+  prompt: string,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  const response = await fetch(
+    `${process.env.LITELLM_BASE_URL}/responses`,
+    {
+      method: 'POST',
+
+      headers: {
+        Authorization:
+          `Bearer ${process.env.LITELLM_API_KEY}`,
+
+        'Content-Type':
+          'application/json',
+      },
+
+      body: JSON.stringify({
+        model:
+          process.env.MODEL_NAME ||
+          'gpt-5.6-luna',
+
+        input: `
+${prompt}
+
+Return ONLY valid JSON.
+Do not use markdown fences.
+Do not include text before or after the JSON.
+        `.trim(),
+
+        max_output_tokens: 1000,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Model call failed: ${response.status} ${await response.text()}`,
+    );
+  }
+
+  const data: any =
+    await response.json();
+
+  const text =
+    extractOutputText(data);
 
   if (!text) {
     throw new Error(
@@ -145,16 +168,17 @@ Do not include commentary before or after the JSON.
     );
   }
 
+  const cleaned = text
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
   let parsed: unknown;
 
   try {
-    const cleaned = text
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-
-    parsed = JSON.parse(cleaned);
+    parsed =
+      JSON.parse(cleaned);
   } catch {
     throw new Error(
       `Model returned invalid JSON: ${text}`,
@@ -195,7 +219,10 @@ async function runTool<T>(
 /*
 ========================================================
 STEP 1
-RESEARCH WATCHLIST IN PARALLEL
+RESEARCH BRANDS
+
+One web research call per brand.
+Brands run concurrently.
 ========================================================
 */
 
@@ -203,7 +230,9 @@ const researchBrands = createStep({
   id: 'research-brands',
 
   inputSchema: z.object({
-    brands: z.array(z.string()),
+    brands: z.array(
+      z.string(),
+    ),
   }),
 
   outputSchema: z.object({
@@ -212,38 +241,38 @@ const researchBrands = createStep({
     ),
   }),
 
-  execute: async ({ inputData }) => {
+  execute: async ({
+    inputData,
+  }) => {
     const research =
       await Promise.all(
         inputData.brands.map(
           async brand => {
-            const result =
-              await runTool<{
-                brandContext: {
-                  purpose: string;
-                  customerPersonas: string[];
-                  targetAudience: string;
-                };
+            try {
+              const result =
+                await runTool<{
+                  research: string;
+                }>(
+                  brandResearchTool,
+                  { brand },
+                );
 
-                recentSignals: Array<{
-                  signal: string;
-                  relevance: string;
-                  source: string;
-                }>;
-              }>(
-                brandResearchTool,
-                { brand },
+              return {
+                brand,
+                research:
+                  result.research,
+              };
+            } catch (error) {
+              console.error(
+                `Brand research failed for ${brand}:`,
+                error,
               );
 
-            return {
-              brand,
-
-              brandContext:
-                result.brandContext,
-
-              recentSignals:
-                result.recentSignals,
-            };
+              return {
+                brand,
+                research: '',
+              };
+            }
           },
         ),
       );
@@ -255,12 +284,21 @@ const researchBrands = createStep({
 /*
 ========================================================
 STEP 2
-EVALUATE COMMERCIAL POTENTIAL
+UNDERSTAND + EVALUATE BRANDS
+
+No web search here.
+
+This turns the prose research into:
+- purpose
+- personas
+- audience
+- recent signals
+- opportunity score
 ========================================================
 */
 
-const evaluateSignals = createStep({
-  id: 'evaluate-signals',
+const evaluateBrands = createStep({
+  id: 'evaluate-brands',
 
   inputSchema: z.object({
     research: z.array(
@@ -269,14 +307,24 @@ const evaluateSignals = createStep({
   }),
 
   outputSchema: z.object({
-    signals: z.array(
-      signalSchema,
+    brands: z.array(
+      evaluatedBrandSchema,
     ),
   }),
 
-  execute: async ({ inputData }) => {
+  execute: async ({
+    inputData,
+  }) => {
     const evaluationSchema =
       z.object({
+        brandContext:
+          brandContextSchema,
+
+        recentSignals:
+          z.array(
+            recentSignalSchema,
+          ),
+
         opportunityStrength:
           z.enum([
             'HIGH',
@@ -291,36 +339,28 @@ const evaluateSignals = createStep({
             'SIGNAL_AND_FIT',
           ]),
 
-        reason: z.string(),
+        reason:
+          z.string(),
       });
 
-    const signals =
+    const brands =
       await Promise.all(
         inputData.research.map(
           async item => {
-            /*
-            --------------------------------------------
-            RESEARCH FAILED ENTIRELY
-            --------------------------------------------
-            */
-
-            const hasContext =
-              Boolean(
-                item.brandContext.purpose ||
-                item.brandContext.targetAudience ||
-                item.brandContext.customerPersonas.length,
-              );
-
-            if (!hasContext) {
+            if (!item.research) {
               return {
                 brand:
                   item.brand,
 
-                brandContext:
-                  item.brandContext,
+                research: '',
 
-                recentSignals:
-                  item.recentSignals,
+                brandContext: {
+                  purpose: '',
+                  customerPersonas: [],
+                  targetAudience: '',
+                },
+
+                recentSignals: [],
 
                 opportunityStrength:
                   'UNKNOWN' as const,
@@ -329,122 +369,153 @@ const evaluateSignals = createStep({
                   'INSUFFICIENT_DATA' as const,
 
                 reason:
-                  'Insufficient brand research to evaluate commercial potential.',
+                  'Brand research was unavailable.',
 
                 investigate:
                   false,
               };
             }
 
-            /*
-            --------------------------------------------
-            EVALUATE BOTH SIGNAL + FIT
-            --------------------------------------------
-            */
+            try {
+              const evaluation =
+                await callJsonModel(
+                  `
+You are evaluating ${item.brand} for proactive advertising and media sales opportunities.
 
-            const evaluation =
-              await callModel(
-                `
-You are deciding whether an advertiser is worth investigating for a proactive media sales opportunity.
+RESEARCH
 
-ADVERTISER
-${item.brand}
+${item.research}
 
-BRAND CONTEXT
-${JSON.stringify(
-  item.brandContext,
-  null,
-  2,
-)}
+Extract the advertiser context from the research:
 
-RECENT SIGNALS
-${JSON.stringify(
-  item.recentSignals,
-  null,
-  2,
-)}
+- purpose or positioning
+- up to 3 important customer personas
+- target audience
+- recent commercially relevant developments
 
-Evaluate COMMERCIAL POTENTIAL.
+Then decide whether this advertiser deserves deeper commercial investigation.
 
-There are two valid reasons to investigate:
+There are two legitimate reasons to investigate.
 
-1. SIGNAL-LED
-Something meaningful has recently changed that could create new advertising, marketing or partnership demand.
+SIGNAL_LED:
+A meaningful recent development creates potential new advertising, marketing or partnership demand.
 
-2. FIT-LED
-Even without a major recent development, the advertiser has clear audiences, categories or customer needs that could create a strong media partnership opportunity.
+FIT_LED:
+The advertiser has a strong audience, category or customer need that could create a valuable media partnership even without major recent news.
 
-A brand can therefore be worth investigating even when RECENT SIGNALS is empty.
-
-CLASSIFICATION
-
-HIGH
-There is a compelling reason to investigate now.
-
-MEDIUM
-There is credible commercial potential worth matching against Future's portfolio.
-
-LOW
-There is little evidence that further investigation is likely to produce a strong opportunity.
-
-OPPORTUNITY BASIS
-
-SIGNAL_LED
-The primary reason is a recent development.
-
-FIT_LED
-The primary reason is strong underlying audience/category/customer fit.
-
-SIGNAL_AND_FIT
+SIGNAL_AND_FIT:
 Both are materially important.
 
-Do not invent Future capabilities here.
-You are only deciding whether the advertiser deserves deeper investigation.
+A brand does NOT need recent news to qualify.
 
-Be selective, but do not require recent news.
+Score:
+
+HIGH:
+Compelling commercial potential.
+
+MEDIUM:
+Credible commercial potential worth matching against Future.
+
+LOW:
+Little evidence that deeper investigation is likely to create a strong opportunity.
+
+Only use facts contained in the supplied research.
 
 Return:
 
 {
+  "brandContext": {
+    "purpose": "concise description",
+    "customerPersonas": [
+      "persona",
+      "persona",
+      "persona"
+    ],
+    "targetAudience": "concise description"
+  },
+  "recentSignals": [
+    {
+      "signal": "concise development",
+      "relevance": "why it matters commercially",
+      "source": "source and date"
+    }
+  ],
   "opportunityStrength": "HIGH or MEDIUM or LOW",
   "opportunityBasis": "SIGNAL_LED or FIT_LED or SIGNAL_AND_FIT",
   "reason": "one concise sentence"
 }
-                `.trim(),
+                  `.trim(),
 
-                evaluationSchema,
+                  evaluationSchema,
+                );
+
+              return {
+                brand:
+                  item.brand,
+
+                research:
+                  item.research,
+
+                brandContext:
+                  evaluation.brandContext,
+
+                recentSignals:
+                  evaluation.recentSignals,
+
+                opportunityStrength:
+                  evaluation.opportunityStrength,
+
+                opportunityBasis:
+                  evaluation.opportunityBasis,
+
+                reason:
+                  evaluation.reason,
+
+                investigate:
+                  evaluation.opportunityStrength ===
+                    'HIGH' ||
+                  evaluation.opportunityStrength ===
+                    'MEDIUM',
+              };
+            } catch (error) {
+              console.error(
+                `Brand evaluation failed for ${item.brand}:`,
+                error,
               );
 
-            return {
-              brand:
-                item.brand,
+              return {
+                brand:
+                  item.brand,
 
-              brandContext:
-                item.brandContext,
+                research:
+                  item.research,
 
-              recentSignals:
-                item.recentSignals,
+                brandContext: {
+                  purpose: '',
+                  customerPersonas: [],
+                  targetAudience: '',
+                },
 
-              opportunityStrength:
-                evaluation.opportunityStrength,
+                recentSignals: [],
 
-              opportunityBasis:
-                evaluation.opportunityBasis,
+                opportunityStrength:
+                  'UNKNOWN' as const,
 
-              reason:
-                evaluation.reason,
+                opportunityBasis:
+                  'INSUFFICIENT_DATA' as const,
 
-              investigate:
-                evaluation.opportunityStrength ===
-                  'HIGH' ||
-                evaluation.opportunityStrength ===
-                  'MEDIUM',
-            };
+                reason:
+                  'Brand research could not be evaluated reliably.',
+
+                investigate:
+                  false,
+              };
+            }
           },
         ),
       );
 
-    return { signals };
+    return { brands };
   },
 });
 
@@ -452,6 +523,8 @@ Return:
 ========================================================
 STEP 3
 BUILD OPPORTUNITIES
+
+Only HIGH / MEDIUM brands reach here.
 ========================================================
 */
 
@@ -460,8 +533,8 @@ const buildOpportunities =
     id: 'build-opportunities',
 
     inputSchema: z.object({
-      signals: z.array(
-        signalSchema,
+      brands: z.array(
+        evaluatedBrandSchema,
       ),
     }),
 
@@ -479,28 +552,28 @@ const buildOpportunities =
       inputData,
     }) => {
       const ignored =
-        inputData.signals
+        inputData.brands
           .filter(
-            signal =>
-              !signal.investigate,
+            brand =>
+              !brand.investigate,
           )
-          .map(signal => ({
+          .map(brand => ({
             brand:
-              signal.brand,
+              brand.brand,
 
             opportunityStrength:
-              signal.opportunityStrength as
+              brand.opportunityStrength as
                 | 'LOW'
                 | 'UNKNOWN',
 
             reason:
-              signal.reason,
+              brand.reason,
           }));
 
       const candidates =
-        inputData.signals.filter(
-          signal =>
-            signal.investigate,
+        inputData.brands.filter(
+          brand =>
+            brand.investigate,
         );
 
       const synthesisSchema =
@@ -524,20 +597,17 @@ const buildOpportunities =
             z.string(),
         });
 
-      /*
-      ====================================================
-      BUILD EACH CANDIDATE IN PARALLEL
-      ====================================================
-      */
-
       const opportunities =
         await Promise.all(
           candidates.map(
-            async signal => {
+            async brand => {
               /*
-              --------------------------------------------
-              PORTFOLIO + COMMERCIAL MOMENTS IN PARALLEL
-              --------------------------------------------
+              ============================================
+              FUTURE MATCHING
+
+              Portfolio and commercial moments can
+              run concurrently.
+              ============================================
               */
 
               const [
@@ -551,32 +621,29 @@ const buildOpportunities =
                   {
                     question: `
 Advertiser:
-${signal.brand}
+${brand.brand}
 
-Brand purpose:
-${signal.brandContext.purpose}
+Purpose:
+${brand.brandContext.purpose}
 
 Target audience:
-${signal.brandContext.targetAudience}
+${brand.brandContext.targetAudience}
 
 Customer personas:
-${signal.brandContext.customerPersonas.join(
+${brand.brandContext.customerPersonas.join(
   ', ',
 )}
 
 Recent signals:
 ${JSON.stringify(
-  signal.recentSignals,
+  brand.recentSignals,
   null,
   2,
 )}
 
-Opportunity basis:
-${signal.opportunityBasis}
-
 Identify the 3 strongest Future-owned brands, audiences or areas of editorial authority for this advertiser.
 
-Prioritize genuine audience, category and customer fit.
+Prioritize genuine audience and category fit.
 
 Do not force a match.
 
@@ -592,28 +659,25 @@ Be concise.
                   {
                     question: `
 Advertiser:
-${signal.brand}
+${brand.brand}
 
-Brand purpose:
-${signal.brandContext.purpose}
+Purpose:
+${brand.brandContext.purpose}
 
 Target audience:
-${signal.brandContext.targetAudience}
+${brand.brandContext.targetAudience}
 
 Customer personas:
-${signal.brandContext.customerPersonas.join(
+${brand.brandContext.customerPersonas.join(
   ', ',
 )}
 
 Recent signals:
 ${JSON.stringify(
-  signal.recentSignals,
+  brand.recentSignals,
   null,
   2,
 )}
-
-Opportunity basis:
-${signal.opportunityBasis}
 
 Identify up to 3 relevant upcoming Future commercial packages, cultural moments or tentpoles.
 
@@ -632,12 +696,12 @@ Be concise.
               ]);
 
               /*
-              --------------------------------------------
-              PRODUCT
-              --------------------------------------------
+              ============================================
+              PRODUCT MATCH
+              ============================================
               */
 
-              const products =
+              const product =
                 await runTool<{
                   answer: string;
                 }>(
@@ -645,28 +709,25 @@ Be concise.
                   {
                     question: `
 Advertiser:
-${signal.brand}
+${brand.brand}
 
-Brand purpose:
-${signal.brandContext.purpose}
+Purpose:
+${brand.brandContext.purpose}
 
 Target audience:
-${signal.brandContext.targetAudience}
+${brand.brandContext.targetAudience}
 
 Customer personas:
-${signal.brandContext.customerPersonas.join(
+${brand.brandContext.customerPersonas.join(
   ', ',
 )}
 
 Recent signals:
 ${JSON.stringify(
-  signal.recentSignals,
+  brand.recentSignals,
   null,
   2,
 )}
-
-Opportunity basis:
-${signal.opportunityBasis}
 
 Future portfolio:
 ${portfolio.answer}
@@ -688,47 +749,44 @@ Be concise.
                 );
 
               /*
-              --------------------------------------------
+              ============================================
               SYNTHESIS
-              --------------------------------------------
+              ============================================
               */
 
               const synthesis =
-                await callModel(
+                await callJsonModel(
                   `
 You are Apollo, Future's commercial opportunity assistant.
 
-Create ONE strong actionable commercial opportunity.
-
-ADVERTISER
-${signal.brand}
+Create ONE strong, actionable commercial opportunity for ${brand.brand}.
 
 BRAND PURPOSE
-${signal.brandContext.purpose}
+${brand.brandContext.purpose}
 
 TARGET AUDIENCE
-${signal.brandContext.targetAudience}
+${brand.brandContext.targetAudience}
 
 CUSTOMER PERSONAS
-${signal.brandContext.customerPersonas.join(
+${brand.brandContext.customerPersonas.join(
   ', ',
 )}
 
 RECENT SIGNALS
 ${JSON.stringify(
-  signal.recentSignals,
+  brand.recentSignals,
   null,
   2,
 )}
 
 OPPORTUNITY STRENGTH
-${signal.opportunityStrength}
+${brand.opportunityStrength}
 
 OPPORTUNITY BASIS
-${signal.opportunityBasis}
+${brand.opportunityBasis}
 
-WHY INVESTIGATED
-${signal.reason}
+WHY THIS WAS INVESTIGATED
+${brand.reason}
 
 FUTURE PORTFOLIO
 ${portfolio.answer}
@@ -737,23 +795,19 @@ COMMERCIAL PACKAGES / MOMENTS
 ${commercial.answer}
 
 PRODUCT KNOWLEDGE
-${products.answer}
-
-RULES
+${product.answer}
 
 Create a commercial idea, not a research summary.
 
 Start with the advertiser's need, audience or current priority.
 
-Use the strongest Future assets only.
+Use only the strongest relevant Future assets.
 
 Prefer ONE strong idea.
 
-Recent news is useful when available, but do not pretend there is a recent trigger if the opportunity is FIT_LED.
+If this is FIT_LED, do not invent a recent trigger.
 
-If the opportunity is FIT_LED, explain why the audience/category fit makes it commercially interesting now.
-
-An existing commercial package is optional.
+An existing Future package is optional.
 
 A supported Future product or capability must enable the recommendation.
 
@@ -769,7 +823,7 @@ If proposing a new commercial concept, clearly treat it as a proposal.
 Return:
 
 {
-  "opportunity": "short seller-friendly opportunity name",
+  "opportunity": "short seller-friendly name",
   "whyNow": "maximum two concise sentences",
   "idea": "two or three concise sentences explaining what we should pitch",
   "futureFit": "maximum three relevant Future assets or capabilities",
@@ -783,15 +837,15 @@ Return:
 
               return {
                 brand:
-                  signal.brand,
+                  brand.brand,
 
                 opportunityStrength:
-                  signal.opportunityStrength as
+                  brand.opportunityStrength as
                     | 'HIGH'
                     | 'MEDIUM',
 
                 opportunityBasis:
-                  signal.opportunityBasis as
+                  brand.opportunityBasis as
                     | 'SIGNAL_LED'
                     | 'FIT_LED'
                     | 'SIGNAL_AND_FIT',
@@ -836,6 +890,6 @@ export const opportunityMonitorWorkflow =
     }),
   })
     .then(researchBrands)
-    .then(evaluateSignals)
+    .then(evaluateBrands)
     .then(buildOpportunities)
     .commit();
