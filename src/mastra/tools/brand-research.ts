@@ -1,18 +1,31 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
+const brandContextSchema = z.object({
+  purpose: z.string(),
+  customerPersonas: z.array(z.string()),
+  targetAudience: z.string(),
+});
+
+const recentSignalSchema = z.object({
+  signal: z.string(),
+  relevance: z.string(),
+  source: z.string(),
+});
+
 export const brandResearchTool = createTool({
   id: 'brand-research',
 
   description:
-    'Research current advertiser priorities using recent web sources. Use for external corporate, marketing, advertising, product and growth signals.',
+    'Research an advertiser using current web information. Returns stable brand context, customer personas and target audience, plus commercially relevant signals from the last 90 days.',
 
   inputSchema: z.object({
     brand: z.string().describe('Brand or advertiser to research'),
   }),
 
   outputSchema: z.object({
-    research: z.string(),
+    brandContext: brandContextSchema,
+    recentSignals: z.array(recentSignalSchema),
   }),
 
   execute: async ({ brand }) => {
@@ -24,31 +37,61 @@ export const brandResearchTool = createTool({
           Authorization: `Bearer ${process.env.LITELLM_API_KEY}`,
           'Content-Type': 'application/json',
         },
+
         body: JSON.stringify({
           model: 'gpt-5.6-luna',
 
           input: `
-Research ${brand} using current web sources.
+Research ${brand} as a potential advertising client using current web sources.
 
-Focus on the LAST 90 DAYS.
+Return TWO kinds of information.
 
-Return exactly 3 commercially relevant signals.
+BRAND CONTEXT
 
-For each:
-- SIGNAL: max 20 words
-- RELEVANCE: max 20 words
-- SOURCE: publisher/source and date
+Establish:
+- brand purpose or positioning
+- up to 3 important customer personas
+- concise description of the target audience
 
-Prioritize:
-- corporate strategy
+This does not need to be limited to the last 90 days.
+Prefer primary brand/company sources where possible.
+
+RECENT SIGNALS
+
+Search the LAST 90 DAYS for up to 3 commercially relevant developments involving:
+- corporate priorities
 - marketing or advertising priorities
-- growth categories or products
-- material business challenges
+- product/category growth
+- launches
+- major business challenges
 
-Prefer primary sources and recent reporting.
-Do not provide background unless required to understand a signal.
+Only include meaningful developments.
+
+If there are no credible recent developments, return an empty recentSignals array.
+
+Return ONLY valid JSON:
+
+{
+  "brandContext": {
+    "purpose": "concise description",
+    "customerPersonas": [
+      "persona",
+      "persona",
+      "persona"
+    ],
+    "targetAudience": "concise description"
+  },
+  "recentSignals": [
+    {
+      "signal": "max 25 words",
+      "relevance": "why this could matter commercially, max 25 words",
+      "source": "source and date"
+    }
+  ]
+}
+
 Do not invent information.
-Maximum 150 words total.
+Do not use markdown.
           `.trim(),
 
           tools: [
@@ -58,8 +101,7 @@ Maximum 150 words total.
             },
           ],
 
-          tool_choice: 'auto',
-          max_output_tokens: 500,
+          max_output_tokens: 800,
         }),
       },
     );
@@ -72,7 +114,7 @@ Maximum 150 words total.
 
     const data: any = await response.json();
 
-    const research = (data.output ?? [])
+    const text = (data.output ?? [])
       .flatMap((item: any) => item.content ?? [])
       .filter((content: any) => content.type === 'output_text')
       .map((content: any) => content.text)
@@ -80,8 +122,30 @@ Maximum 150 words total.
       .join('\n')
       .trim();
 
+    if (!text) {
+      return {
+        brandContext: {
+          purpose: '',
+          customerPersonas: [],
+          targetAudience: '',
+        },
+        recentSignals: [],
+      };
+    }
+
+    const cleaned = text
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    const parsed = JSON.parse(cleaned);
+
     return {
-      research: research || 'No recent brand research was found.',
+      brandContext: brandContextSchema.parse(parsed.brandContext),
+      recentSignals: z
+        .array(recentSignalSchema)
+        .parse(parsed.recentSignals ?? []),
     };
   },
 });
