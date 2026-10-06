@@ -5,6 +5,7 @@ import { brandResearchTool } from '../tools/brand-research.js';
 import { futurePortfolioTool } from '../tools/future-portfolio.js';
 import { commercialOpportunitiesTool } from '../tools/commercial-opportunities.js';
 import { productKnowledgeTool } from '../tools/product-knowledge.js';
+import { opticIntentTool } from '../tools/optic-intent.js';
 
 /*
 ========================================================
@@ -77,6 +78,14 @@ const opportunitySchema = z.object({
   futureFit: z.string(),
   product: z.string(),
   nextStep: z.string(),
+
+  opticIntent: z.string(),
+
+  sellerEmailSubject: z.string(),
+  sellerEmail: z.string(),
+
+  clientEmailSubject: z.string(),
+  clientEmail: z.string(),
 });
 
 const ignoredSchema = z.object({
@@ -96,7 +105,9 @@ HELPERS
 ========================================================
 */
 
-function extractOutputText(data: any): string {
+function extractOutputText(
+  data: any,
+): string {
   return (data.output ?? [])
     .flatMap(
       (item: any) =>
@@ -119,38 +130,54 @@ async function callJsonModel<T>(
   prompt: string,
   schema: z.ZodType<T>,
 ): Promise<T> {
-  let lastError: Error | null = null;
+  let lastError: Error | null =
+    null;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  /*
+  One retry for transient LiteLLM /
+  Responses failures.
+
+  We do NOT repeat web research here.
+  */
+
+  for (
+    let attempt = 1;
+    attempt <= 2;
+    attempt++
+  ) {
     try {
-      const response = await fetch(
-        `${process.env.LITELLM_BASE_URL}/responses`,
-        {
-          method: 'POST',
+      const response =
+        await fetch(
+          `${process.env.LITELLM_BASE_URL}/responses`,
+          {
+            method: 'POST',
 
-          headers: {
-            Authorization:
-              `Bearer ${process.env.LITELLM_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
+            headers: {
+              Authorization:
+                `Bearer ${process.env.LITELLM_API_KEY}`,
 
-          body: JSON.stringify({
-            model:
-              process.env.MODEL_NAME ||
-              'gpt-5.6-luna',
+              'Content-Type':
+                'application/json',
+            },
 
-            input: `
+            body: JSON.stringify({
+              model:
+                process.env.MODEL_NAME ||
+                'gpt-5.6-luna',
+
+              input: `
 ${prompt}
 
 Return ONLY valid JSON.
 Do not use markdown fences.
 Do not include text before or after the JSON.
-            `.trim(),
+              `.trim(),
 
-            max_output_tokens: 1000,
-          }),
-        },
-      );
+              max_output_tokens:
+                1400,
+            }),
+          },
+        );
 
       if (!response.ok) {
         throw new Error(
@@ -158,9 +185,11 @@ Do not include text before or after the JSON.
         );
       }
 
-      const data: any = await response.json();
+      const data: any =
+        await response.json();
 
-      const text = extractOutputText(data);
+      const text =
+        extractOutputText(data);
 
       if (!text) {
         throw new Error(
@@ -169,19 +198,33 @@ Do not include text before or after the JSON.
       }
 
       const cleaned = text
-        .replace(/^```json\s*/i, '')
-        .replace(/^```\s*/i, '')
-        .replace(/\s*```$/i, '')
+        .replace(
+          /^```json\s*/i,
+          '',
+        )
+        .replace(
+          /^```\s*/i,
+          '',
+        )
+        .replace(
+          /\s*```$/i,
+          '',
+        )
         .trim();
 
-      const parsed = JSON.parse(cleaned);
+      const parsed =
+        JSON.parse(cleaned);
 
-      return schema.parse(parsed);
+      return schema.parse(
+        parsed,
+      );
     } catch (error) {
       lastError =
         error instanceof Error
           ? error
-          : new Error(String(error));
+          : new Error(
+              String(error),
+            );
 
       console.error(
         `Model call attempt ${attempt} failed:`,
@@ -189,20 +232,31 @@ Do not include text before or after the JSON.
       );
 
       if (attempt < 2) {
-        await new Promise(resolve =>
-          setTimeout(resolve, 1000),
+        await new Promise(
+          resolve =>
+            setTimeout(
+              resolve,
+              1000,
+            ),
         );
       }
     }
   }
 
-  throw lastError ??
-    new Error('Model call failed.');
+  throw (
+    lastError ??
+    new Error(
+      'Model call failed.',
+    )
+  );
 }
 
 async function runTool<T>(
   tool: any,
-  input: Record<string, unknown>,
+  input: Record<
+    string,
+    unknown
+  >,
 ): Promise<T> {
   const result =
     await tool.execute(
@@ -235,200 +289,214 @@ RESEARCH BRANDS
 
 One web research call per brand.
 Brands run concurrently.
+
+Output is normal prose, not JSON.
 ========================================================
 */
 
-const researchBrands = createStep({
-  id: 'research-brands',
+const researchBrands =
+  createStep({
+    id: 'research-brands',
 
-  inputSchema: z.object({
-    brands: z.array(
-      z.string(),
-    ),
-  }),
+    inputSchema: z.object({
+      brands: z.array(
+        z.string(),
+      ),
+    }),
 
-  outputSchema: z.object({
-    research: z.array(
-      researchItemSchema,
-    ),
-  }),
+    outputSchema: z.object({
+      research: z.array(
+        researchItemSchema,
+      ),
+    }),
 
-  execute: async ({
-    inputData,
-  }) => {
-    const research =
-      await Promise.all(
-        inputData.brands.map(
-          async brand => {
-            try {
-              const result =
-                await runTool<{
-                  research: string;
-                }>(
-                  brandResearchTool,
-                  { brand },
+    execute: async ({
+      inputData,
+    }) => {
+      const research =
+        await Promise.all(
+          inputData.brands.map(
+            async brand => {
+              try {
+                const result =
+                  await runTool<{
+                    research: string;
+                  }>(
+                    brandResearchTool,
+                    { brand },
+                  );
+
+                return {
+                  brand,
+                  research:
+                    result.research,
+                };
+              } catch (error) {
+                console.error(
+                  `Brand research failed for ${brand}:`,
+                  error,
                 );
 
-              return {
-                brand,
-                research:
-                  result.research,
-              };
-            } catch (error) {
-              console.error(
-                `Brand research failed for ${brand}:`,
-                error,
-              );
+                return {
+                  brand,
+                  research: '',
+                };
+              }
+            },
+          ),
+        );
 
-              return {
-                brand,
-                research: '',
-              };
-            }
-          },
-        ),
-      );
-
-    return { research };
-  },
-});
+      return { research };
+    },
+  });
 
 /*
 ========================================================
 STEP 2
-UNDERSTAND + EVALUATE BRANDS
+UNDERSTAND + QUALIFY BRANDS
 
-No web search here.
+No web search.
 
-This turns the prose research into:
-- purpose
+Turn the research into:
+- brand purpose
 - personas
 - audience
 - recent signals
-- opportunity score
+- opportunity strength
 ========================================================
 */
 
-const evaluateBrands = createStep({
-  id: 'evaluate-brands',
+const evaluateBrands =
+  createStep({
+    id: 'evaluate-brands',
 
-  inputSchema: z.object({
-    research: z.array(
-      researchItemSchema,
-    ),
-  }),
+    inputSchema: z.object({
+      research: z.array(
+        researchItemSchema,
+      ),
+    }),
 
-  outputSchema: z.object({
-    brands: z.array(
-      evaluatedBrandSchema,
-    ),
-  }),
+    outputSchema: z.object({
+      brands: z.array(
+        evaluatedBrandSchema,
+      ),
+    }),
 
-  execute: async ({
-    inputData,
-  }) => {
-    const evaluationSchema =
-      z.object({
-        brandContext:
-          brandContextSchema,
+    execute: async ({
+      inputData,
+    }) => {
+      const evaluationSchema =
+        z.object({
+          brandContext:
+            brandContextSchema,
 
-        recentSignals:
-          z.array(
-            recentSignalSchema,
-          ),
+          recentSignals:
+            z.array(
+              recentSignalSchema,
+            ),
 
-        opportunityStrength:
-          z.enum([
-            'HIGH',
-            'MEDIUM',
-            'LOW',
-          ]),
+          opportunityStrength:
+            z.enum([
+              'HIGH',
+              'MEDIUM',
+              'LOW',
+            ]),
 
-        opportunityBasis:
-          z.enum([
-            'SIGNAL_LED',
-            'FIT_LED',
-            'SIGNAL_AND_FIT',
-          ]),
+          opportunityBasis:
+            z.enum([
+              'SIGNAL_LED',
+              'FIT_LED',
+              'SIGNAL_AND_FIT',
+            ]),
 
-        reason:
-          z.string(),
-      });
+          reason:
+            z.string(),
+        });
 
-    const brands =
-      await Promise.all(
-        inputData.research.map(
-          async item => {
-            if (!item.research) {
-              return {
-                brand:
-                  item.brand,
+      const brands =
+        await Promise.all(
+          inputData.research.map(
+            async item => {
+              if (
+                !item.research
+              ) {
+                return {
+                  brand:
+                    item.brand,
 
-                research: '',
+                  research: '',
 
-                brandContext: {
-                  purpose: '',
-                  customerPersonas: [],
-                  targetAudience: '',
-                },
+                  brandContext: {
+                    purpose: '',
+                    customerPersonas:
+                      [],
+                    targetAudience:
+                      '',
+                  },
 
-                recentSignals: [],
+                  recentSignals: [],
 
-                opportunityStrength:
-                  'UNKNOWN' as const,
+                  opportunityStrength:
+                    'UNKNOWN' as const,
 
-                opportunityBasis:
-                  'INSUFFICIENT_DATA' as const,
+                  opportunityBasis:
+                    'INSUFFICIENT_DATA' as const,
 
-                reason:
-                  'Brand research was unavailable.',
+                  reason:
+                    'Brand research was unavailable.',
 
-                investigate:
-                  false,
-              };
-            }
+                  investigate:
+                    false,
+                };
+              }
 
-            try {
-              const evaluation =
-                await callJsonModel(
-                  `
+              try {
+                const evaluation =
+                  await callJsonModel(
+                    `
 You are evaluating ${item.brand} for proactive advertising and media sales opportunities.
 
-RESEARCH
+WEB RESEARCH
 
 ${item.research}
 
-Extract the advertiser context from the research:
+First extract:
 
-- purpose or positioning
-- up to 3 important customer personas
-- target audience
-- recent commercially relevant developments
+1. Brand purpose or positioning
+2. Up to 3 important customer personas
+3. Target audience
+4. Any recent commercially relevant developments contained in the research
 
 Then decide whether this advertiser deserves deeper commercial investigation.
 
-There are two legitimate reasons to investigate.
+There are TWO legitimate reasons to investigate.
 
-SIGNAL_LED:
+SIGNAL_LED
+
 A meaningful recent development creates potential new advertising, marketing or partnership demand.
 
-FIT_LED:
+FIT_LED
+
 The advertiser has a strong audience, category or customer need that could create a valuable media partnership even without major recent news.
 
-SIGNAL_AND_FIT:
+SIGNAL_AND_FIT
+
 Both are materially important.
 
 A brand does NOT need recent news to qualify.
 
-Score:
+CLASSIFICATION
 
-HIGH:
+HIGH
+
 Compelling commercial potential.
 
-MEDIUM:
+MEDIUM
+
 Credible commercial potential worth matching against Future.
 
-LOW:
+LOW
+
 Little evidence that deeper investigation is likely to create a strong opportunity.
 
 Only use facts contained in the supplied research.
@@ -456,87 +524,106 @@ Return:
   "opportunityBasis": "SIGNAL_LED or FIT_LED or SIGNAL_AND_FIT",
   "reason": "one concise sentence"
 }
-                  `.trim(),
+                    `.trim(),
 
-                  evaluationSchema,
+                    evaluationSchema,
+                  );
+
+                return {
+                  brand:
+                    item.brand,
+
+                  research:
+                    item.research,
+
+                  brandContext:
+                    evaluation.brandContext,
+
+                  recentSignals:
+                    evaluation.recentSignals,
+
+                  opportunityStrength:
+                    evaluation.opportunityStrength,
+
+                  opportunityBasis:
+                    evaluation.opportunityBasis,
+
+                  reason:
+                    evaluation.reason,
+
+                  investigate:
+                    evaluation.opportunityStrength ===
+                      'HIGH' ||
+                    evaluation.opportunityStrength ===
+                      'MEDIUM',
+                };
+              } catch (error) {
+                console.error(
+                  `Brand evaluation failed for ${item.brand}:`,
+                  error,
                 );
 
-              return {
-                brand:
-                  item.brand,
+                return {
+                  brand:
+                    item.brand,
 
-                research:
-                  item.research,
+                  research:
+                    item.research,
 
-                brandContext:
-                  evaluation.brandContext,
+                  brandContext: {
+                    purpose: '',
+                    customerPersonas:
+                      [],
+                    targetAudience:
+                      '',
+                  },
 
-                recentSignals:
-                  evaluation.recentSignals,
+                  recentSignals: [],
 
-                opportunityStrength:
-                  evaluation.opportunityStrength,
+                  opportunityStrength:
+                    'UNKNOWN' as const,
 
-                opportunityBasis:
-                  evaluation.opportunityBasis,
+                  opportunityBasis:
+                    'INSUFFICIENT_DATA' as const,
 
-                reason:
-                  evaluation.reason,
+                  reason:
+                    'Brand research could not be evaluated reliably.',
 
-                investigate:
-                  evaluation.opportunityStrength ===
-                    'HIGH' ||
-                  evaluation.opportunityStrength ===
-                    'MEDIUM',
-              };
-            } catch (error) {
-              console.error(
-                `Brand evaluation failed for ${item.brand}:`,
-                error,
-              );
+                  investigate:
+                    false,
+                };
+              }
+            },
+          ),
+        );
 
-              return {
-                brand:
-                  item.brand,
-
-                research:
-                  item.research,
-
-                brandContext: {
-                  purpose: '',
-                  customerPersonas: [],
-                  targetAudience: '',
-                },
-
-                recentSignals: [],
-
-                opportunityStrength:
-                  'UNKNOWN' as const,
-
-                opportunityBasis:
-                  'INSUFFICIENT_DATA' as const,
-
-                reason:
-                  'Brand research could not be evaluated reliably.',
-
-                investigate:
-                  false,
-              };
-            }
-          },
-        ),
-      );
-
-    return { brands };
-  },
-});
+      return { brands };
+    },
+  });
 
 /*
 ========================================================
 STEP 3
 BUILD OPPORTUNITIES
 
-Only HIGH / MEDIUM brands reach here.
+Only HIGH / MEDIUM candidates continue.
+
+Flow:
+
+Future portfolio
+        +
+Commercial opportunities
+        ↓
+Product knowledge
+        ↓
+If Optic relevant:
+Optic intent research
+        ↓
+Opportunity
+        ↓
+Seller email
+        ↓
+Proposed client email
 ========================================================
 */
 
@@ -563,6 +650,12 @@ const buildOpportunities =
     execute: async ({
       inputData,
     }) => {
+      /*
+      --------------------------------------------
+      IGNORE NON-CANDIDATES
+      --------------------------------------------
+      */
+
       const ignored =
         inputData.brands
           .filter(
@@ -588,6 +681,12 @@ const buildOpportunities =
             brand.investigate,
         );
 
+      /*
+      --------------------------------------------
+      FINAL OUTPUT SCHEMA
+      --------------------------------------------
+      */
+
       const synthesisSchema =
         z.object({
           opportunity:
@@ -607,7 +706,28 @@ const buildOpportunities =
 
           nextStep:
             z.string(),
+
+          opticIntent:
+            z.string(),
+
+          sellerEmailSubject:
+            z.string(),
+
+          sellerEmail:
+            z.string(),
+
+          clientEmailSubject:
+            z.string(),
+
+          clientEmail:
+            z.string(),
         });
+
+      /*
+      --------------------------------------------
+      PROCESS QUALIFIED BRANDS CONCURRENTLY
+      --------------------------------------------
+      */
 
       const opportunities =
         await Promise.all(
@@ -615,10 +735,10 @@ const buildOpportunities =
             async brand => {
               /*
               ============================================
-              FUTURE MATCHING
+              FUTURE PORTFOLIO +
+              COMMERCIAL OPPORTUNITIES
 
-              Portfolio and commercial moments can
-              run concurrently.
+              These can run concurrently.
               ============================================
               */
 
@@ -709,7 +829,7 @@ Be concise.
 
               /*
               ============================================
-              PRODUCT MATCH
+              PRODUCT KNOWLEDGE
               ============================================
               */
 
@@ -747,9 +867,11 @@ ${portfolio.answer}
 Commercial opportunities:
 ${commercial.answer}
 
-Determine which Future product or capability best enables the strongest commercial opportunity.
+Determine which Future commercial product or capability best enables the strongest opportunity.
 
-Compare relevant Future products.
+Compare relevant Future products and capabilities.
+
+The product recommendation should be a Future commercial product or capability, not merely the name of an editorial package or cultural moment.
 
 Recommend the strongest supported fit.
 
@@ -762,29 +884,82 @@ Be concise.
 
               /*
               ============================================
-              SYNTHESIS
+              OPTIC INTENT
+
+              Only run if Product Knowledge suggests
+              Optic is relevant.
+              ============================================
+              */
+
+              const opticRelevant =
+                /\boptic\b/i.test(
+                  product.answer,
+                );
+
+              let opticIntent =
+                'Optic was not identified as a relevant Future product, so no additional GEO or AI-discovery intent research was run.';
+
+              if (opticRelevant) {
+                try {
+                  const result =
+                    await runTool<{
+                      research: string;
+                    }>(
+                      opticIntentTool,
+                      {
+                        brand:
+                          brand.brand,
+                      },
+                    );
+
+                  opticIntent =
+                    result.research;
+                } catch (error) {
+                  console.error(
+                    `Optic intent research failed for ${brand.brand}:`,
+                    error,
+                  );
+
+                  opticIntent =
+                    'Optic appears relevant, but public GEO or AI-discovery intent research could not be completed.';
+                }
+              }
+
+              /*
+              ============================================
+              FINAL SYNTHESIS
+
+              Opportunity
+              +
+              Seller email
+              +
+              Client email
               ============================================
               */
 
               const synthesis =
                 await callJsonModel(
                   `
-You are Apollo, Future's commercial opportunity assistant.
+You are Apollo, Future's proactive commercial opportunity assistant.
 
 Create ONE strong, actionable commercial opportunity for ${brand.brand}.
 
 BRAND PURPOSE
+
 ${brand.brandContext.purpose}
 
 TARGET AUDIENCE
+
 ${brand.brandContext.targetAudience}
 
 CUSTOMER PERSONAS
+
 ${brand.brandContext.customerPersonas.join(
   ', ',
 )}
 
 RECENT SIGNALS
+
 ${JSON.stringify(
   brand.recentSignals,
   null,
@@ -792,22 +967,34 @@ ${JSON.stringify(
 )}
 
 OPPORTUNITY STRENGTH
+
 ${brand.opportunityStrength}
 
 OPPORTUNITY BASIS
+
 ${brand.opportunityBasis}
 
-WHY THIS WAS INVESTIGATED
+WHY THIS BRAND WAS INVESTIGATED
+
 ${brand.reason}
 
 FUTURE PORTFOLIO
+
 ${portfolio.answer}
 
 COMMERCIAL PACKAGES / MOMENTS
+
 ${commercial.answer}
 
 PRODUCT KNOWLEDGE
+
 ${product.answer}
+
+OPTIC INTENT RESEARCH
+
+${opticIntent}
+
+COMMERCIAL OPPORTUNITY RULES
 
 Create a commercial idea, not a research summary.
 
@@ -817,11 +1004,15 @@ Use only the strongest relevant Future assets.
 
 Prefer ONE strong idea.
 
-If this is FIT_LED, do not invent a recent trigger.
+If this is FIT_LED, do not invent or imply a recent trigger.
 
-An existing Future package is optional.
+If this is SIGNAL_LED or SIGNAL_AND_FIT, use only recent developments supported by the supplied research.
 
-A supported Future product or capability must enable the recommendation.
+An existing Future commercial package is optional.
+
+A supported Future commercial product or capability must enable the recommendation.
+
+Do not confuse an editorial package or cultural moment with the Future product/capability recommendation.
 
 Do not invent:
 - Future products
@@ -829,18 +1020,107 @@ Do not invent:
 - prices
 - audiences
 - advertiser priorities
+- client activity
+- executive statements
 
-If proposing a new commercial concept, clearly treat it as a proposal.
+If proposing a new commercial concept, clearly treat it as a proposal rather than an existing Future package.
+
+OPTIC RULES
+
+If Optic is recommended:
+
+Use the Optic intent research to determine whether the opportunity is supported by explicit client intent or is simply a strong strategic fit.
+
+If the brand, CMO or marketing leadership has explicitly discussed:
+- Generative Engine Optimization
+- GEO
+- AI discovery
+- AI search
+- LLM visibility
+- answer engines
+- agentic shopping
+
+then surface that as an important reason to engage.
+
+If there is no explicit public evidence, Optic may still be recommended based on strategic fit.
+
+However, NEVER imply that the client has declared GEO or AI discovery as a priority unless the Optic intent research explicitly supports it.
+
+Never invent a statement from a CMO, executive or brand.
+
+SELLER EMAIL
+
+Write a concise proactive INTERNAL email to the Future seller responsible for this advertiser.
+
+The seller email must explain:
+
+1. What we know about the client and what they appear to be focused on.
+2. Why this creates a potential commercial opportunity for Future.
+3. The ONE opportunity Apollo recommends.
+4. The relevant Future brands, package/moment and commercial product/capability.
+5. Why the seller should engage now.
+6. The recommended next action.
+
+If Optic is recommended, explicitly distinguish between:
+- public evidence that the client is interested in GEO / AI discovery
+- Optic simply being a strong strategic fit
+
+Do not overstate certainty.
+
+End by telling the seller that a proposed client email is included below.
+
+CLIENT EMAIL
+
+Write a short proposed email that the seller can edit and send to the client.
+
+The client email must:
+
+- sound natural and human
+- be concise
+- start from a supported client priority, audience or public development
+- introduce ONE relevant Future idea
+- explain why Future can add value
+- finish with a simple request to discuss
+
+Do NOT mention:
+- Apollo
+- opportunity scoring
+- FIT_LED
+- SIGNAL_LED
+- internal Future research
+- internal Future processes
+- model analysis
+
+Do not claim knowledge of a client's strategy unless supported by the supplied evidence.
+
+Never claim that the client has an AI, GEO or AI-discovery priority unless the Optic intent research explicitly supports it.
+
+Do not present a proposed commercial concept as though it is an existing Future package.
 
 Return:
 
 {
-  "opportunity": "short seller-friendly name",
-  "whyNow": "maximum two concise sentences",
-  "idea": "two or three concise sentences explaining what we should pitch",
-  "futureFit": "maximum three relevant Future assets or capabilities",
-  "product": "recommended Future product or capability and why",
-  "nextStep": "one specific seller action"
+  "opportunity": "short seller-friendly opportunity name",
+
+  "whyNow": "maximum two concise sentences explaining why this is commercially relevant",
+
+  "idea": "two or three concise sentences explaining what Future should pitch",
+
+  "futureFit": "maximum three relevant Future brands, packages, moments or capabilities",
+
+  "product": "recommended Future commercial product or capability and why",
+
+  "nextStep": "one specific action for the seller",
+
+  "opticIntent": "concise summary of explicit GEO / AI-discovery evidence, or clearly state that no explicit evidence was found or Optic was not investigated",
+
+  "sellerEmailSubject": "Apollo opportunity: [Brand] - [short opportunity name]",
+
+  "sellerEmail": "complete concise internal email to the seller",
+
+  "clientEmailSubject": "short natural client-facing subject",
+
+  "clientEmail": "complete concise proposed client-facing email"
 }
                   `.trim(),
 
