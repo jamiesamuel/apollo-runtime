@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.84",
     "@mastra/core": "1.64.0",
     "@mastra/memory": "1.28.2",
     "@mastra/pg": "1.22.3",
